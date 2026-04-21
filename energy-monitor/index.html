@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Energy Monitor PRO v2.1 | Connectivity & AI</title>
+    <meta name="description" content="Premium real-time energy monitoring dashboard v2.1 — with CORS Proxy & Diagnostics">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg: #080a0c;
+            --surface-1: #111418;
+            --surface-2: #191e24;
+            --surface-3: #222830;
+            --surface-4: #2b323c;
+            --border: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.15);
+            --font-ui: 'Instrument Sans', sans-serif;
+            --font-data: 'DM Mono', monospace;
+            --teal: #00f5d4;
+            --blue: #3b82f6;
+            --amber: #f59e0b;
+            --purple: #a855f7;
+            --green: #10b981;
+            --red: #ef4444;
+            --radius: 12px;
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background-color: var(--bg);
+            color: #ffffff;
+            font-family: var(--font-ui);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ═══════════════════════════════════════════
+           HEADER & CONTROLS
+           ═══════════════════════════════════════════ */
+        header {
+            background: var(--surface-1);
+            border-bottom: 1px solid var(--border);
+            padding: 0.75rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(20px);
+        }
+
+        .brand-group { display: flex; align-items: center; gap: 1rem; }
+        .logo {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1.5px solid var(--green);
+            width: 38px; height: 38px;
+            border-radius: 10px;
+            display: grid; place-items: center;
+            color: var(--green);
+        }
+        .title-area h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; display: flex; align-items: center; gap: 0.5rem; }
+        .version-tag { font-size: 0.6rem; background: var(--surface-3); color: var(--teal); padding: 0.15rem 0.4rem; border-radius: 4px; font-weight: 800; }
+
+        .header-actions { display: flex; align-items: center; gap: 1rem; }
+        
+        .toggle-options { display: flex; align-items: center; gap: 1rem; font-size: 0.75rem; color: #888; }
+        .toggle-options label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+        .toggle-options input[type="checkbox"] { accent-color: var(--teal); }
+
+        .ip-group {
+            display: flex;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .ip-group input { background: transparent; border: none; color: #fff; padding: 0.5rem 0.7rem; font-family: var(--font-data); font-size: 0.85rem; outline: none; }
+        .in-ip { width: 130px; }
+        .in-port { width: 55px; border-left: 1px solid var(--border); }
+
+        .btn { padding: 0.55rem 1.1rem; border-radius: 8px; font-weight: 700; font-size: 0.82rem; cursor: pointer; transition: all 0.2s; border: none; font-family: var(--font-ui); }
+        .btn-connect { background: var(--teal); color: #000; }
+        .btn-connect.active { background: var(--red); color: #fff; }
+        .btn-sim { background: var(--surface-3); color: #fff; }
+        .btn-sim.active { background: var(--purple); box-shadow: 0 0 10px rgba(168, 85, 247, 0.3); }
+
+        /* ═══════════════════════════════════════════
+           MAIN LAYOUT
+           ═══════════════════════════════════════════ */
+        main { max-width: 1600px; margin: 0 auto; padding: 1.5rem; display: grid; gap: 1.5rem; }
+
+        /* Diagnostics Panel */
+        #diagPanel {
+            display: none;
+            background: rgba(239, 68, 68, 0.05);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: var(--radius);
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .diag-title { font-size: 0.85rem; font-weight: 700; color: var(--red); margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+        .diag-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; font-size: 0.72rem; }
+        .diag-step { color: #888; display: flex; flex-direction: column; gap: 0.25rem; }
+        .diag-step.active { color: #fff; font-weight: 600; }
+        .diag-step.success { color: var(--green); }
+        .diag-step.fail { color: var(--red); }
+        .diag-suggestion { margin-top: 1rem; font-size: 0.8rem; padding: 0.5rem; background: var(--surface-2); border-radius: 6px; color: var(--amber); }
+
+        /* Metrics */
+        .metrics-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.25rem; }
+        .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 1rem; transition: all 0.3s; }
+        .card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--accent); }
+        .card:hover { transform: translateY(-3px); background: var(--surface-2); }
+        .card-v { --accent: var(--blue); } .card-a { --accent: var(--amber); } .card-w { --accent: var(--teal); } .card-wh { --accent: var(--purple); } .card-cost { --accent: var(--green); }
+
+        .card-label { font-size: 0.65rem; font-weight: 700; color: #777; letter-spacing: 0.08em; text-transform: uppercase; }
+        .val-wrap { display: flex; align-items: baseline; gap: 0.4rem; }
+        .value { font-family: var(--font-data); font-size: 1.75rem; font-weight: 500; }
+        .unit { font-size: 0.8rem; color: #555; font-weight: 600; }
+        .delta { font-size: 0.7rem; font-family: var(--font-data); padding: 0.2rem 0.4rem; border-radius: 4px; }
+        .delta.up { color: var(--red); background: rgba(239, 68, 68, 0.1); } .delta.down { color: var(--green); background: rgba(16, 185, 129, 0.1); }
+
+        /* Info Grid */
+        .info-grid { display: grid; grid-template-columns: 1.4fr 0.8fr 0.8fr; gap: 1.5rem; }
+        .panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; overflow: hidden; }
+        .p-head { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; font-weight: 700; color: #777; }
+        .p-body { padding: 1.25rem; flex: 1; }
+
+        /* AI Cycle */
+        .ai-cycle { display: flex; flex-direction: column; gap: 0.75rem; }
+        .ai-badge { background: var(--surface-2); padding: 0.4rem 0.75rem; border-radius: 6px; font-family: var(--font-data); font-size: 0.75rem; width: fit-content; display: flex; align-items: center; gap: 0.5rem; border: 1px solid var(--border); }
+        .progress-thin { height: 3px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--purple); width: 0%; transition: width 0.1s linear; }
+
+        /* Heatmap */
+        .heatmap-grid { display: grid; grid-template-columns: auto repeat(24, 1fr); gap: 2px; }
+        .hm-cell { aspect-ratio: 1/1; background: #0c1014; border-radius: 1.5px; }
+        .hm-day { font-size: 0.55rem; color: #555; text-align: right; padding-right: 4px; line-height: 1.8; }
+
+        /* Chat */
+        .chat-area { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; }
+        .bubble { max-width: 85%; padding: 0.75rem 1rem; border-radius: 12px; font-size: 0.88rem; line-height: 1.5; }
+        .b-ai { align-self: flex-start; background: var(--surface-2); border-bottom-left-radius: 2px; color: #ddd; }
+        .b-user { align-self: flex-end; background: var(--teal); border-bottom-right-radius: 2px; color: #000; font-weight: 600; }
+
+        /* Footer */
+        footer { background: var(--surface-1); border-top: 1px solid var(--border); padding: 0.75rem 2rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: #555; position: sticky; bottom: 0; width: 100%; z-index: 90; }
+        #debugView { margin-top: 1rem; background: #000; padding: 1rem; border-radius: 8px; font-family: var(--font-data); font-size: 0.75rem; color: #0f0; overflow-x: auto; max-height: 200px; display: none; }
+        
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        .shimmer { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent); background-size: 200% 100%; animation: shimmer 1s infinite; }
+
+        .btn-toggle-raw { cursor: pointer; color: #666; text-decoration: underline; }
+        .btn-toggle-raw:hover { color: #888; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="brand-group">
+        <div class="logo"><i data-lucide="zap"></i></div>
+        <div class="title-area">
+            <h1>Energy Monitor <span class="version-tag">v2.1 PRO</span></h1>
+        </div>
+    </div>
+    
+    <div class="header-actions">
+        <div class="toggle-options">
+            <label><input type="checkbox" id="useProxy"> Use CORS proxy</label>
+            <button id="simBtn" class="btn btn-sim" onclick="toggleSim()">SIMULATE</button>
+        </div>
+        <div class="ip-group">
+            <input type="text" id="ip" class="in-ip" placeholder="192.168.1.100">
+            <input type="text" id="port" class="in-port" placeholder="80">
+        </div>
+        <button id="mainBtn" class="btn btn-connect" onclick="toggleConnect()">CONNECT</button>
+    </div>
+</header>
+
+<main>
+    <!-- DIAGNOSTICS PANEL -->
+    <div id="diagPanel">
+        <div class="diag-title"><i data-lucide="shield-alert" size="16"></i> CONNECTION DIAGNOSTICS</div>
+        <div class="diag-steps">
+            <div class="diag-step" id="step1"><span>Step 1</span><strong>Network Reach</strong><small id="step1-info">Waiting...</small></div>
+            <div class="diag-step" id="step2"><span>Step 2</span><strong>Tasmota API</strong><small id="step2-info">Waiting...</small></div>
+            <div class="diag-step" id="step3"><span>Step 3</span><strong>CORS Policy</strong><small id="step3-info">Waiting...</small></div>
+            <div class="diag-step" id="step4"><span>Step 4</span><strong>JSON Parsing</strong><small id="step4-info">Waiting...</small></div>
+        </div>
+        <div class="diag-suggestion" id="diagSuggestion"></div>
+    </div>
+
+    <!-- METRICS -->
+    <div class="metrics-grid">
+        <div class="card card-v">
+            <span class="card-label">Voltage</span>
+            <div class="val-wrap"><span class="value" id="v">0.0</span><span class="unit">V</span></div>
+        </div>
+        <div class="card card-a">
+            <span class="card-label">Current</span>
+            <div class="val-wrap"><span class="value" id="a">0.000</span><span class="unit">A</span></div>
+        </div>
+        <div id="pCard" class="card card-w">
+            <span class="card-label">Active Power</span>
+            <div class="val-wrap">
+                <span class="value" id="p" style="color:var(--teal)">0</span><span class="unit">W</span>
+                <span id="delta" class="delta" style="display:none"></span>
+            </div>
+        </div>
+        <div class="card card-wh">
+            <span class="card-label">Consumption</span>
+            <div class="val-wrap"><span class="value" id="wh">0</span><span class="unit">Wh today</span></div>
+        </div>
+        <div class="card card-cost">
+            <span class="card-label">Estimated Cost</span>
+            <div class="val-wrap"><span class="value" id="cost">0.00</span><span class="unit">₹</span></div>
+        </div>
+    </div>
+
+    <!-- AI & STATS -->
+    <div class="info-grid">
+        <div class="panel">
+            <div class="p-head"><span><i data-lucide="bot" size="16"></i> AI ANOMALY ENGINE</span><span id="aiTimer" style="font-family:var(--font-data)">IDLE</span></div>
+            <div class="p-body ai-cycle">
+                <div class="ai-badge" id="aiBadge" style="color:var(--purple)"><i data-lucide="scan" size="14"></i> <span id="aiStatus">WAITING FOR DATA</span></div>
+                <div class="progress-thin"><div class="progress-fill" id="aiFill"></div></div>
+                <div id="aiMsg" style="font-size:0.85rem; color:#aaa; margin-top:1rem;">Dashboard standby. Start connection to begin real-time analysis.</div>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="p-head"><span><i data-lucide="leaf" size="16"></i> CARBON (INDIA)</span></div>
+            <div class="p-body">
+                <div style="font-family:var(--font-data); font-size:2rem; font-weight:400; color:var(--green)" id="valCo2">0.0</div>
+                <div style="font-size:0.7rem; color:#666">GRAMS CO₂ TODAY</div>
+                <div class="progress-thin" style="margin-top:1rem; background:#111;"><div id="barCo2" style="height:100%; transition:0.3s; width:0%"></div></div>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="p-head"><span><i data-lucide="trending-down" size="16"></i> BUDGET TRACKER</span></div>
+            <div class="p-body">
+                <div style="font-family:var(--font-data); font-size:1.5rem;" id="valSpend">₹0</div>
+                <div style="font-size:0.75rem; color:#666">PROJECTED / ₹1000</div>
+                <div class="progress-thin" style="margin-top:1rem; background:#111;"><div id="barSpend" style="height:100%; transition:0.3s; width:0%"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHART & HEATMAP -->
+    <div style="display:grid; grid-template-columns: 2fr 1fr; gap:1.5rem;">
+        <div class="panel" style="min-height:350px;">
+            <div class="p-head"><span><i data-lucide="line-chart" size="16"></i> POWER TREND</span></div>
+            <div class="p-body" style="position:relative"><canvas id="chart"></canvas></div>
+        </div>
+        <div class="panel">
+            <div class="p-head"><span><i data-lucide="grid" size="16"></i> HEATMAP (24H)</span></div>
+            <div class="p-body" id="heatmapContainer"></div>
+        </div>
+    </div>
+
+    <!-- CHAT & LOG -->
+    <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:1.5rem;">
+        <div class="panel chat-container" style="height:400px; display:flex; flex-direction:column;">
+            <div class="p-head"><span><i data-lucide="message-square" size="16"></i> ASSISTANT</span></div>
+            <div class="p-body chat-area" id="chats">
+                <div class="bubble b-ai">I'm ready. Ask about your consumption or projections.</div>
+            </div>
+            <div style="padding:1rem; border-top:1px solid var(--border); display:flex; gap:0.5rem;">
+                <input type="text" id="chatIn" placeholder="Ask Claude..." style="flex:1; background:var(--surface-2); border:1px solid var(--border); color:#fff; padding:0.6rem; border-radius:6px; outline:none;" onkeydown="if(event.key==='Enter')sendChat()">
+                <button class="btn btn-connect" onclick="sendChat()" id="chatBtn">ASK</button>
+            </div>
+        </div>
+        <div class="panel" style="height:400px; display:flex; flex-direction:column;">
+            <div class="p-head"><span><i data-lucide="list" size="16"></i> LOG</span> <button class="btn" style="background:var(--surface-3); color:#fff; padding:0.3rem 0.6rem; font-size:0.7rem;" onclick="exportLog()">EXPORT</button></div>
+            <div style="flex:1; overflow-y:auto; font-family:var(--font-data); font-size:0.75rem;">
+                <table style="width:100%; border-collapse:collapse;">
+                    <thead style="position:sticky; top:0; background:var(--surface-2); color:#666;"><tr><th style="padding:0.6rem; text-align:left;">TIME</th><th>V</th><th>A</th><th>W</th><th>₹</th></tr></thead>
+                    <tbody id="logBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<footer>
+    <div id="lastUpd">LAST POLL: --:--:--</div>
+    <div id="footerStatus">
+        <span class="btn-toggle-raw" onclick="$('debugView').style.display=$('debugView').style.display==='none'?'block':'none'">View raw API response</span>
+    </div>
+    <div style="font-weight:700;">PRO ENGINE 2.1</div>
+</footer>
+
+<div id="debugView">No data received yet. Connect to a device or start simulation.</div>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   STATE & CORE logic
+   ═══════════════════════════════════════════════════ */
+lucide.createIcons();
+const $ = id => document.getElementById(id);
+
+let state = {
+    connected: false,
+    simulating: false,
+    lastPower: 0,
+    pollTimer: null,
+    aiCountdown: 60,
+    aiInterval: null,
+    history: [],
+    heatmap: JSON.parse(localStorage.getItem('em_heatmap_v21') || '{}')
+};
+
+// CHART
+const chart = new Chart($('chart').getContext('2d'), {
+    type: 'line',
+    data: { labels: [], datasets: [{ data: [], borderColor: '#00f5d4', borderWidth: 2, pointRadius: 0, fill: true, backgroundColor: 'rgba(0,245,212,0.05)', tension: 0.4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+    scales: { x: { grid: { display: false }, ticks: { color: '#333', font: { size: 10 } } }, y: { grid: { color: '#111' }, ticks: { color: '#333', font: { size: 10 } }, beginAtZero: true } } }
+});
+
+/* ═══════════════════════════════════════════════════
+   CONNECTION & FETCHING (v2.1)
+   ═══════════════════════════════════════════════════ */
+function toggleConnect() {
+    if (state.connected) disconnect();
+    else connect();
+}
+
+function connect() {
+    const ip = $('ip').value.trim();
+    if (!ip) { alert("Enter IP"); return; }
+    
+    // Stop simulation if running
+    if (state.simulating) toggleSim();
+    
+    state.connected = true;
+    $('mainBtn').textContent = "DISCONNECT";
+    $('mainBtn').classList.add('active');
+    $('diagPanel').style.display = 'block';
+    
+    runPoll();
+    state.pollTimer = setInterval(runPoll, 5000);
+    startAICycle();
+}
+
+function disconnect() {
+    state.connected = false;
+    clearInterval(state.pollTimer);
+    clearInterval(state.aiInterval);
+    $('mainBtn').textContent = "CONNECT";
+    $('mainBtn').classList.remove('active');
+    $('diagPanel').style.display = 'none';
+}
+
+async function runPoll() {
+    if (state.simulating) return;
+    
+    const ip = $('ip').value.trim();
+    const port = $('port').value.trim() || '80';
+    const useProxy = $('useProxy').checked;
+    
+    const endpoints = [
+        `http://${ip}:${port}/cm?cmnd=Status%208`,
+        `http://${ip}:${port}/cm?cmnd=EnergyToday`,
+        `http://${ip}:${port}/cm?cmnd=Status%2010`,
+        `http://${ip}:${port}/api`
+    ];
+
+    resetDiags();
+    setDiagStep(1, 'active', 'Scanning network...');
+
+    for (let i = 0; i < endpoints.length; i++) {
+        let url = endpoints[i];
+        if (useProxy) url = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        
+        try {
+            setDiagStep(2, 'active', `Trying ${endpoints[i].split('=')[1] || 'API'}...`);
+            
+            // Step 3 will be inferred by the failure or success of fetch
+            const res = await fetch(url, { 
+                mode: (useProxy ? 'cors' : 'cors'), // no-cors is useless for reading data
+                timeout: 3000 
+            });
+
+            const data = await res.json();
+            $('debugView').textContent = JSON.stringify(data, null, 2);
+            
+            // Map data
+            let eng = null;
+            if (data.StatusSNS?.ENERGY) eng = data.StatusSNS.ENERGY;
+            else if (data.Today !== undefined) eng = { Today: data.Today, Power: data.Power, Voltage: data.Voltage, Current: data.Current };
+            else if (data.StatusSNS) eng = data.StatusSNS.ENERGY || data.StatusSNS; // Status 10 variant
+            
+            if (eng) {
+                setDiagStep(1, 'success', 'Reach OK');
+                setDiagStep(2, 'success', 'Found Tasmota');
+                setDiagStep(3, 'success', useProxy ? 'Proxy OK' : 'CORS OK');
+                setDiagStep(4, 'success', 'Data Parsed');
+                updateUI(eng);
+                return;
+            }
+        } catch (e) {
+            console.warn(`Endpoint ${i} failed:`, e);
+        }
+    }
+
+    // If we get here, all failed
+    setDiagStep(2, 'fail', 'Device Unresponsive');
+    setDiagStep(3, 'fail', 'Check CORS/WiFi');
+    $('diagSuggestion').textContent = `SUGGESTION: Ensure device is on the same WiFi (${ip}). ${useProxy ? 'Proxy is active.' : 'Try enabling "Use CORS proxy" above.'}`;
+}
+
+function setDiagStep(step, status, info) {
+    const el = $('step' + step);
+    el.className = 'diag-step ' + status;
+    $(el.id + '-info').textContent = info;
+}
+
+function resetDiags() {
+    for(let i=1; i<=4; i++) setDiagStep(i, '', 'Waiting...');
+    $('diagSuggestion').textContent = '';
+}
+
+/* ═══════════════════════════════════════════════════
+   SIMULATION ENGINE
+   ═══════════════════════════════════════════════════ */
+function toggleSim() {
+    if (state.simulating) {
+        state.simulating = false;
+        clearInterval(state.pollTimer);
+        clearInterval(state.aiInterval);
+        $('simBtn').textContent = "SIMULATE";
+        $('simBtn').classList.remove('active');
+        if (state.connected) runPoll(); // resume real polling if was connected
+    } else {
+        if (state.connected) disconnect();
+        state.simulating = true;
+        $('simBtn').textContent = "STOP SIM";
+        $('simBtn').classList.add('active');
+        $('diagPanel').style.display = 'none';
+        
+        simLoop();
+        state.pollTimer = setInterval(simLoop, 5000);
+        startAICycle();
+    }
+}
+
+let simAccWh = 0;
+function simLoop() {
+    const p = 20 + Math.random() * 460;
+    const v = 210 + Math.random() * 30;
+    const a = p / v;
+    simAccWh += (p / 3600) * 5; // increment based on 5s interval
+    
+    const fakeData = {
+        Voltage: v,
+        Current: a,
+        Power: Math.round(p),
+        Today: simAccWh / 1000,
+        Cost: (simAccWh / 1000) * 8.5 // 8.5 Rs per unit
+    };
+    
+    $('debugView').textContent = `// SIMULATED DATA\n${JSON.stringify(fakeData, null, 2)}`;
+    updateUI(fakeData);
+}
+
+/* ═══════════════════════════════════════════════════
+   UI UPDATES (v2.0 features preserved)
+   ═══════════════════════════════════════════════════ */
+function updateUI(e) {
+    const now = new Date();
+    const t = now.toLocaleTimeString([], {hour12:false});
+    
+    $('v').textContent = e.Voltage.toFixed(1);
+    $('a').textContent = e.Current.toFixed(3);
+    
+    // Power + Delta
+    const p = e.Power;
+    const dEl = $('delta');
+    if (state.lastPower !== 0) {
+        const diff = p - state.lastPower;
+        if (diff !== 0) {
+            dEl.style.display = 'inline-block';
+            dEl.textContent = (diff > 0 ? '▲ ' : '▼ ') + Math.abs(diff);
+            dEl.className = 'delta ' + (diff > 0 ? 'up' : 'down');
+        }
+    }
+    $('p').textContent = p;
+    state.lastPower = p;
+
+    // Shimmer
+    $('pCard').classList.add('shimmer');
+    setTimeout(() => $('pCard').classList.remove('shimmer'), 500);
+
+    // Wh & Cost
+    const wh = e.Today * 1000;
+    $('wh').textContent = wh.toFixed(0);
+    $('cost').textContent = (e.Cost || 0).toFixed(2);
+
+    // Carbon
+    const co2 = e.Today * 0.82 * 1000;
+    $('valCo2').textContent = co2.toFixed(1);
+    const co2Pct = Math.min((co2 / 500) * 100, 100);
+    $('barCo2').style.width = co2Pct + '%';
+    $('barCo2').style.background = co2 > 350 ? 'var(--red)' : (co2 > 150 ? 'var(--amber)' : 'var(--green)');
+
+    // Budget
+    const projected = (e.Cost || 0) * 30;
+    $('valSpend').textContent = `₹${projected.toFixed(0)}`;
+    const budPct = Math.min((projected / 1000) * 100, 100);
+    $('barSpend').style.width = budPct + '%';
+    $('barSpend').style.background = budPct > 90 ? 'var(--red)' : (budPct > 70 ? 'var(--amber)' : 'var(--teal)');
+
+    // Chart
+    chart.data.labels.push(t);
+    chart.data.datasets[0].data.push(p);
+    if (chart.data.labels.length > 20) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+    chart.update('none');
+
+    // Heatmap
+    updateHeatmap(now, p);
+
+    // Log
+    const entry = { t, v: e.Voltage, a: e.Current, w: p, c: e.Cost || 0 };
+    state.history.push(entry);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td style="padding:0.4rem 0.6rem;">${t}</td><td>${e.Voltage.toFixed(1)}</td><td>${e.Current.toFixed(3)}</td><td>${p}</td><td>${(e.Cost||0).toFixed(2)}</td>`;
+    $('logBody').prepend(tr);
+    if($('logBody').children.length > 20) $('logBody').removeChild($('logBody').lastChild);
+
+    $('lastUpd').textContent = `LAST POLL: ${t}`;
+}
+
+function updateHeatmap(d, p) {
+    const k = d.toISOString().split('T')[0];
+    const h = d.getHours();
+    if (!state.heatmap[k]) state.heatmap[k] = {};
+    const old = state.heatmap[k][h] || p;
+    state.heatmap[k][h] = (old + p) / 2;
+    localStorage.setItem('em_heatmap_v21', JSON.stringify(state.heatmap));
+    renderHeatmap();
+}
+
+function renderHeatmap() {
+    const cont = $('heatmapContainer'); cont.innerHTML = '';
+    const grid = document.createElement('div'); grid.className = 'heatmap-grid';
+    
+    grid.appendChild(document.createElement('div'));
+    for(let i=0; i<24; i+=4) { const x = document.createElement('div'); x.style.fontSize='0.5rem'; x.textContent=i; grid.appendChild(x); if(i<20) grid.appendChild(document.createElement('div')); grid.appendChild(document.createElement('div')); grid.appendChild(document.createElement('div')); }
+
+    const days = ['S','M','T','W','T','F','S'];
+    const today = new Date();
+    for(let i=6; i>=0; i--) {
+        const date = new Date(today); date.setDate(today.getDate() - i);
+        const k = date.toISOString().split('T')[0];
+        const label = document.createElement('div'); label.className='hm-day'; label.textContent=days[date.getDay()]; grid.appendChild(label);
+        for(let h=0; h<24; h++) {
+            const cell = document.createElement('div'); cell.className='hm-cell';
+            if(state.heatmap[k] && state.heatmap[k][h]) {
+                const intense = Math.min(state.heatmap[k][h] / 500, 1);
+                cell.style.background = `rgba(0, 245, 212, ${0.1 + intense*0.9})`;
+            }
+            grid.appendChild(cell);
+        }
+    }
+    cont.appendChild(grid);
+}
+
+/* ═══════════════════════════════════════════════════
+   AI & CHAT (CLAUDE v2.0)
+   ═══════════════════════════════════════════════════ */
+function startAICycle() {
+    state.aiCountdown = 60;
+    state.aiInterval = setInterval(() => {
+        state.aiCountdown--;
+        $('aiTimer').textContent = state.aiCountdown + 'S';
+        $('aiFill').style.width = ((60 - state.aiCountdown) / 60 * 100) + '%';
+        if (state.aiCountdown <= 0) { runAI(); state.aiCountdown = 60; }
+    }, 1000);
+}
+
+async function runAI() {
+    const badge = $('aiBadge');
+    $('aiStatus').textContent = "SCANNING...";
+    badge.style.color = "var(--purple)";
+    
+    const win = chart.data.datasets[0].data;
+    if (win.length < 5) { $('aiStatus').textContent = "IDLE (DATA)"; return; }
+    
+    const prompt = `Analyze these power readings (W) for anomalies: [${win.join(', ')}]. JSON only: {"severity":"NORMAL|WARNING|CRITICAL", "message":"1 sentence insight"}`;
+    try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", { 
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
+        });
+        const d = await res.json();
+        const rep = JSON.parse(d.content[0].text);
+        $('aiStatus').textContent = rep.severity;
+        $('aiMsg').textContent = rep.message;
+        badge.style.color = rep.severity === 'NORMAL' ? 'var(--green)' : (rep.severity === 'WARNING' ? 'var(--amber)' : 'var(--red)');
+    } catch (e) {
+        $('aiStatus').textContent = "STANDBY";
+    }
+}
+
+async function sendChat() {
+    const m = $('chatIn').value.trim(); if (!m) return;
+    $('chatIn').value = '';
+    addBubble(m, 'user');
+    const b = $('chatBtn'); b.disabled = true;
+
+    const ctx = `Latest: ${state.lastPower}W. Projected: ${$('valSpend').textContent}. Budget: ₹1000. Heatmap active.`;
+    const prompt = `Assistant for energy. Data: ${ctx}. User: ${m}. Concise 2-sentence reply.`;
+    try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", { 
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
+        });
+        const d = await res.json();
+        addBubble(d.content[0].text, 'ai');
+    } catch (e) { addBubble("AI offline.", 'ai'); }
+    finally { b.disabled = false; }
+}
+
+function addBubble(t, who) {
+    const c = $('chats'); const d = document.createElement('div'); d.className = `bubble b-${who}`; d.textContent = t; c.appendChild(d); c.scrollTop = c.scrollHeight;
+}
+
+function exportLog() {
+    if(!state.history.length) return;
+    let csv = "Time,Voltage,Current,Power,Cost\n";
+    state.history.forEach(r => { csv += `${r.t},${r.v},${r.a},${r.w},${r.c}\n`; });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'})); a.download='energy_log.csv'; a.click();
+}
+
+window.onload = renderHeatmap;
+</script>
+</body>
+</html>
