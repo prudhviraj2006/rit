@@ -105,7 +105,8 @@
             padding: 1rem;
             margin-bottom: 1rem;
         }
-        .diag-title { font-size: 0.85rem; font-weight: 700; color: var(--red); margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+        .diag-title { font-size: 0.85rem; font-weight: 700; color: var(--red); margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+        .diag-env-warn { font-size: 0.7rem; color: var(--amber); background: rgba(245, 158, 11, 0.1); padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(245, 158, 11, 0.2); }
         .diag-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; font-size: 0.72rem; }
         .diag-step { color: #888; display: flex; flex-direction: column; gap: 0.25rem; }
         .diag-step.active { color: #fff; font-weight: 600; }
@@ -159,6 +160,16 @@
 
         .btn-toggle-raw { cursor: pointer; color: #666; text-decoration: underline; }
         .btn-toggle-raw:hover { color: #888; }
+
+        /* Heatmap Tooltip */
+        .hm-cell { position: relative; }
+        .hm-cell:hover::after {
+            content: attr(data-tip);
+            position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+            background: var(--surface-4); color: #fff; padding: 4px 8px; border-radius: 4px;
+            font-size: 0.6rem; white-space: nowrap; z-index: 10; pointer-events: none;
+            border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body>
@@ -177,7 +188,7 @@
             <button id="simBtn" class="btn btn-sim" onclick="toggleSim()">SIMULATE</button>
         </div>
         <div class="ip-group">
-            <input type="text" id="ip" class="in-ip" placeholder="192.168.1.100">
+            <input type="text" id="ip" class="in-ip" placeholder="10.235.94.81" value="10.235.94.81">
             <input type="text" id="port" class="in-port" placeholder="80">
         </div>
         <button id="mainBtn" class="btn btn-connect" onclick="toggleConnect()">CONNECT</button>
@@ -187,7 +198,10 @@
 <main>
     <!-- DIAGNOSTICS PANEL -->
     <div id="diagPanel">
-        <div class="diag-title"><i data-lucide="shield-alert" size="16"></i> CONNECTION DIAGNOSTICS</div>
+        <div class="diag-title">
+            <span><i data-lucide="shield-alert" size="16"></i> CONNECTION DIAGNOSTICS</span>
+            <span id="envWarn" class="diag-env-warn" style="display:none">Protocol Warning: file:// detected</span>
+        </div>
         <div class="diag-steps">
             <div class="diag-step" id="step1"><span>Step 1</span><strong>Network Reach</strong><small id="step1-info">Waiting...</small></div>
             <div class="diag-step" id="step2"><span>Step 2</span><strong>Tasmota API</strong><small id="step2-info">Waiting...</small></div>
@@ -313,8 +327,15 @@ let state = {
     aiCountdown: 60,
     aiInterval: null,
     history: [],
-    heatmap: JSON.parse(localStorage.getItem('em_heatmap_v21') || '{}')
+    heatmap: JSON.parse(localStorage.getItem('em_heatmap_v21') || '{}'),
+    config: JSON.parse(localStorage.getItem('em_config') || '{"ip":"10.235.94.81","port":"80","proxy":false}')
 };
+
+// INITIALIZE CONFIG
+if (state.config.ip) $("ip").value = state.config.ip;
+if (state.config.port) $("port").value = state.config.port;
+if (state.config.proxy) $("useProxy").checked = state.config.proxy;
+if (window.location.protocol === 'file:') $("envWarn").style.display = 'block';
 
 // CHART
 const chart = new Chart($('chart').getContext('2d'), {
@@ -323,6 +344,21 @@ const chart = new Chart($('chart').getContext('2d'), {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
     scales: { x: { grid: { display: false }, ticks: { color: '#333', font: { size: 10 } } }, y: { grid: { color: '#111' }, ticks: { color: '#333', font: { size: 10 } }, beginAtZero: true } } }
 });
+
+/* Helper for Fetch with Timeout */
+async function fetchWithTimeout(resource, options = {}) {
+    const { timeout = 3000 } = options;
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+        const response = await fetch(resource, { ...options, signal: controller.signal });
+        clearTimeout(id);
+        return response;
+    } catch (e) {
+        clearTimeout(id);
+        throw e;
+    }
+}
 
 /* ═══════════════════════════════════════════════════
    CONNECTION & FETCHING (v2.1)
@@ -333,16 +369,20 @@ function toggleConnect() {
 }
 
 function connect() {
-    const ip = $('ip').value.trim();
+    const ip = $("ip").value.trim();
     if (!ip) { alert("Enter IP"); return; }
+    
+    // Save to local storage
+    state.config = { ip, port: $("port").value.trim(), proxy: $("useProxy").checked };
+    localStorage.setItem('em_config', JSON.stringify(state.config));
     
     // Stop simulation if running
     if (state.simulating) toggleSim();
     
     state.connected = true;
-    $('mainBtn').textContent = "DISCONNECT";
-    $('mainBtn').classList.add('active');
-    $('diagPanel').style.display = 'block';
+    $("mainBtn").textContent = "DISCONNECT";
+    $("mainBtn").classList.add("active");
+    $("diagPanel").style.display = "block";
     
     runPoll();
     state.pollTimer = setInterval(runPoll, 5000);
@@ -353,18 +393,29 @@ function disconnect() {
     state.connected = false;
     clearInterval(state.pollTimer);
     clearInterval(state.aiInterval);
-    $('mainBtn').textContent = "CONNECT";
-    $('mainBtn').classList.remove('active');
-    $('diagPanel').style.display = 'none';
+    $("mainBtn").textContent = "CONNECT";
+    $("mainBtn").classList.remove("active");
+    $("diagPanel").style.display = "none";
 }
 
 async function runPoll() {
     if (state.simulating) return;
     
-    const ip = $('ip').value.trim();
-    const port = $('port').value.trim() || '80';
-    const useProxy = $('useProxy').checked;
+    const ip = $("ip").value.trim();
+    const port = $("port").value.trim() || "80";
+    const useProxy = $("useProxy").checked;
     
+    resetDiags();
+
+    // Validation: Public proxy cannot reach Local IPs
+    const isLocal = ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.16.") || ip.startsWith("127.0.0.1") || ip.toLowerCase().endsWith(".local");
+    if (useProxy && isLocal) {
+        setDiagStep(1, "fail", "Incompatible");
+        setDiagStep(2, "fail", "Proxy Error");
+        $("diagSuggestion").innerHTML = `<strong>SECURITY LIMITATION:</strong> Public CORS proxies cannot access private local IPs like <code>${ip}</code>. <br>Please <b>uncheck</b> "Use CORS proxy". <br><br><i>Note: If you get CORS errors without the proxy, go to your Tasmota Console and type: <code>CorsAllowed *</code></i>`;
+        return;
+    }
+
     const endpoints = [
         `http://${ip}:${port}/cm?cmnd=Status%208`,
         `http://${ip}:${port}/cm?cmnd=EnergyToday`,
@@ -372,24 +423,23 @@ async function runPoll() {
         `http://${ip}:${port}/api`
     ];
 
-    resetDiags();
-    setDiagStep(1, 'active', 'Scanning network...');
+    setDiagStep(1, "active", "Scanning network...");
 
     for (let i = 0; i < endpoints.length; i++) {
         let url = endpoints[i];
         if (useProxy) url = `https://corsproxy.io/?${encodeURIComponent(url)}`;
         
         try {
-            setDiagStep(2, 'active', `Trying ${endpoints[i].split('=')[1] || 'API'}...`);
+            setDiagStep(2, "active", `Trying ${endpoints[i].split("=")[1] || "API"}...`);
             
-            // Step 3 will be inferred by the failure or success of fetch
-            const res = await fetch(url, { 
-                mode: (useProxy ? 'cors' : 'cors'), // no-cors is useless for reading data
-                timeout: 3000 
+            const res = await fetchWithTimeout(url, { 
+                mode: "cors",
+                cache: "no-cache",
+                timeout: 4000 
             });
 
             const data = await res.json();
-            $('debugView').textContent = JSON.stringify(data, null, 2);
+            $("debugView").textContent = JSON.stringify(data, null, 2);
             
             // Map data
             let eng = null;
@@ -398,10 +448,10 @@ async function runPoll() {
             else if (data.StatusSNS) eng = data.StatusSNS.ENERGY || data.StatusSNS; // Status 10 variant
             
             if (eng) {
-                setDiagStep(1, 'success', 'Reach OK');
-                setDiagStep(2, 'success', 'Found Tasmota');
-                setDiagStep(3, 'success', useProxy ? 'Proxy OK' : 'CORS OK');
-                setDiagStep(4, 'success', 'Data Parsed');
+                setDiagStep(1, "success", "Reach OK");
+                setDiagStep(2, "success", "Found Tasmota");
+                setDiagStep(3, "success", useProxy ? "Proxy OK" : "CORS OK");
+                setDiagStep(4, "success", "Data Parsed");
                 updateUI(eng);
                 return;
             }
@@ -411,9 +461,10 @@ async function runPoll() {
     }
 
     // If we get here, all failed
-    setDiagStep(2, 'fail', 'Device Unresponsive');
-    setDiagStep(3, 'fail', 'Check CORS/WiFi');
-    $('diagSuggestion').textContent = `SUGGESTION: Ensure device is on the same WiFi (${ip}). ${useProxy ? 'Proxy is active.' : 'Try enabling "Use CORS proxy" above.'}`;
+    setDiagStep(1, "fail", "Timed Out");
+    setDiagStep(2, "fail", "Device Unresponsive");
+    setDiagStep(3, "fail", "Check WiFi/CORS");
+    $("diagSuggestion").innerHTML = `SUGGESTION: Ensure device is on the same WiFi (${ip}).<br>${useProxy ? "<b>Disable proxy</b> for local devices." : "Ensure <code>CorsAllowed *</code> is set in Tasmota Console."}`;
 }
 
 function setDiagStep(step, status, info) {
@@ -529,12 +580,36 @@ function updateUI(e) {
     // Log
     const entry = { t, v: e.Voltage, a: e.Current, w: p, c: e.Cost || 0 };
     state.history.push(entry);
-    const tr = document.createElement('tr');
+    const tr = document.createElement("tr");
     tr.innerHTML = `<td style="padding:0.4rem 0.6rem;">${t}</td><td>${e.Voltage.toFixed(1)}</td><td>${e.Current.toFixed(3)}</td><td>${p}</td><td>${(e.Cost||0).toFixed(2)}</td>`;
-    $('logBody').prepend(tr);
-    if($('logBody').children.length > 20) $('logBody').removeChild($('logBody').lastChild);
+    $("logBody").prepend(tr);
+    if($("logBody").children.length > 20) $("logBody").removeChild($("logBody").lastChild);
 
-    $('lastUpd').textContent = `LAST POLL: ${t}`;
+    $("lastUpd").textContent = `LAST POLL: ${t}`;
+
+    // Update real values for the smooth counter
+    state.targetValues = { v: e.Voltage, a: e.Current, p: p, cost: e.Cost || 0 };
+}
+
+// PREMIUM COUNTER ENGINE
+state.displayValues = { v: 0, a: 0, p: 0, cost: 0 };
+state.targetValues = { v: 0, a: 0, p: 0, cost: 0 };
+
+function animateUICounters() {
+    const lerp = (s, e, a) => s + (e - s) * a;
+    const { displayValues: d, targetValues: t } = state;
+
+    d.v = lerp(d.v, t.v, 0.1);
+    d.a = lerp(d.a, t.a, 0.1);
+    d.p = lerp(d.p, t.p, 0.1);
+    d.cost = lerp(d.cost, t.cost, 0.1);
+
+    $("v").textContent = d.v.toFixed(1);
+    $("a").textContent = d.a.toFixed(3);
+    $("p").textContent = Math.round(d.p);
+    $("cost").textContent = d.cost.toFixed(2);
+
+    requestAnimationFrame(animateUICounters);
 }
 
 function updateHeatmap(d, p) {
@@ -562,8 +637,10 @@ function renderHeatmap() {
         const label = document.createElement('div'); label.className='hm-day'; label.textContent=days[date.getDay()]; grid.appendChild(label);
         for(let h=0; h<24; h++) {
             const cell = document.createElement('div'); cell.className='hm-cell';
-            if(state.heatmap[k] && state.heatmap[k][h]) {
-                const intense = Math.min(state.heatmap[k][h] / 500, 1);
+            const val = (state.heatmap[k] && state.heatmap[k][h]) ? state.heatmap[k][h] : 0;
+            cell.setAttribute('data-tip', `${h}:00 - ${val.toFixed(0)}W`);
+            if(val > 0) {
+                const intense = Math.min(val / 500, 1);
                 cell.style.background = `rgba(0, 245, 212, ${0.1 + intense*0.9})`;
             }
             grid.appendChild(cell);
@@ -586,46 +663,65 @@ function startAICycle() {
 }
 
 async function runAI() {
-    const badge = $('aiBadge');
-    $('aiStatus').textContent = "SCANNING...";
+    const badge = $("aiBadge");
+    const win = chart.data.datasets[0].data;
+    
+    if (win.length < 5) { 
+        $("aiStatus").textContent = "COLLECTING..."; 
+        badge.style.color = "#555";
+        return; 
+    }
+    
+    $("aiStatus").textContent = "ANALYZING...";
     badge.style.color = "var(--purple)";
     
-    const win = chart.data.datasets[0].data;
-    if (win.length < 5) { $('aiStatus').textContent = "IDLE (DATA)"; return; }
+    // Local Analysis Logic (Fallback for Browser Security)
+    const latest = win[win.length - 1];
+    const prev = win[win.length - 2];
+    const avg = win.reduce((a, b) => a + b, 0) / win.length;
+    const spike = latest > avg * 1.5 && latest > 50;
+    const drop = latest < avg * 0.5 && prev > 10;
     
-    const prompt = `Analyze these power readings (W) for anomalies: [${win.join(', ')}]. JSON only: {"severity":"NORMAL|WARNING|CRITICAL", "message":"1 sentence insight"}`;
-    try {
-        const res = await fetch("https://api.anthropic.com/v1/messages", { 
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
-        });
-        const d = await res.json();
-        const rep = JSON.parse(d.content[0].text);
-        $('aiStatus').textContent = rep.severity;
-        $('aiMsg').textContent = rep.message;
-        badge.style.color = rep.severity === 'NORMAL' ? 'var(--green)' : (rep.severity === 'WARNING' ? 'var(--amber)' : 'var(--red)');
-    } catch (e) {
-        $('aiStatus').textContent = "STANDBY";
-    }
+    let insight = { severity: 'NORMAL', message: 'Consumption is stable based on recent trends.' };
+    
+    if (spike) insight = { severity: 'WARNING', message: `Sudden spike to ${latest}W detected! Verify active appliances.` };
+    else if (drop) insight = { severity: 'NORMAL', message: 'Power usage has dropped significantly (standby mode?).' };
+    else if (latest > 500) insight = { severity: 'CRITICAL', message: 'High load detected. Approaching safety limits for typical plugs.' };
+
+    // Simulate "Processing" feel
+    setTimeout(() => {
+        $("aiStatus").textContent = insight.severity;
+        $("aiMsg").textContent = insight.message;
+        badge.style.color = insight.severity === 'NORMAL' ? 'var(--green)' : (insight.severity === 'WARNING' ? 'var(--amber)' : 'var(--red)');
+    }, 800);
 }
 
 async function sendChat() {
-    const m = $('chatIn').value.trim(); if (!m) return;
-    $('chatIn').value = '';
-    addBubble(m, 'user');
-    const b = $('chatBtn'); b.disabled = true;
+    const m = $("chatIn").value.trim(); if (!m) return;
+    $("chatIn").value = "";
+    addBubble(m, "user");
+    
+    const input = m.toLowerCase();
+    let reply = "I'm monitoring your energy data. I can help with costs, power trends, and anomaly detection. Ask me something like 'What is my cost?'";
 
-    const ctx = `Latest: ${state.lastPower}W. Projected: ${$('valSpend').textContent}. Budget: ₹1000. Heatmap active.`;
-    const prompt = `Assistant for energy. Data: ${ctx}. User: ${m}. Concise 2-sentence reply.`;
-    try {
-        const res = await fetch("https://api.anthropic.com/v1/messages", { 
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
-        });
-        const d = await res.json();
-        addBubble(d.content[0].text, 'ai');
-    } catch (e) { addBubble("AI offline.", 'ai'); }
-    finally { b.disabled = false; }
+    // Small local intent engine
+    if (input.includes("power") || input.includes("watt") || input.includes("usage")) {
+        reply = `Current active power is ${state.lastPower}W. The chart shows your real-time trend.`;
+    } else if (input.includes("cost") || input.includes("spend") || input.includes("bill") || input.includes("money")) {
+        reply = `You've spent ₹${$("cost").textContent} today. Your projected monthly spend is ${$("valSpend").textContent}.`;
+    } else if (input.includes("anomaly") || input.includes("wrong") || input.includes("spike") || input.includes("status")) {
+        reply = `System Status: ${$("aiStatus").textContent}. Insight: ${$("aiMsg").textContent}`;
+    } else if (input.includes("help") || input.includes("what can you do")) {
+        reply = "I can analyze your power spikes, help you track your budget, and explain your carbon footprint. Try asking 'Is my usage normal?'";
+    } else if (input.includes("hi") || input.includes("hello")) {
+        reply = "Hello! I'm your Energy Monitor AI Assistant. How can I help you optimize your usage today?";
+    }
+
+    const b = $("chatBtn"); b.disabled = true;
+    setTimeout(() => {
+        addBubble(reply, "ai");
+        b.disabled = false;
+    }, 600);
 }
 
 function addBubble(t, who) {
@@ -639,7 +735,10 @@ function exportLog() {
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'})); a.download='energy_log.csv'; a.click();
 }
 
-window.onload = renderHeatmap;
+window.onload = () => {
+    renderHeatmap();
+    animateUICounters();
+};
 </script>
 </body>
 </html>
