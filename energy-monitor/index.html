@@ -98,16 +98,8 @@
 
         /* Diagnostics Panel */
         #diagPanel {
-            display: none;
-            background: rgba(239, 68, 68, 0.05);
-            border: 1px solid rgba(239, 68, 68, 0.2);
-            border-radius: var(--radius);
-            padding: 1rem;
-            margin-bottom: 1rem;
+            display: none !important;
         }
-        .diag-title { font-size: 0.85rem; font-weight: 700; color: var(--red); margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-        .diag-env-warn { font-size: 0.7rem; color: var(--amber); background: rgba(245, 158, 11, 0.1); padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(245, 158, 11, 0.2); }
-        .diag-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; font-size: 0.72rem; }
         .diag-step { color: #888; display: flex; flex-direction: column; gap: 0.25rem; }
         .diag-step.active { color: #fff; font-weight: 600; }
         .diag-step.success { color: var(--green); }
@@ -372,17 +364,14 @@ function connect() {
     const ip = $("ip").value.trim();
     if (!ip) { alert("Enter IP"); return; }
     
-    // Save to local storage
     state.config = { ip, port: $("port").value.trim(), proxy: $("useProxy").checked };
     localStorage.setItem('em_config', JSON.stringify(state.config));
     
-    // Stop simulation if running
     if (state.simulating) toggleSim();
     
     state.connected = true;
     $("mainBtn").textContent = "DISCONNECT";
     $("mainBtn").classList.add("active");
-    $("diagPanel").style.display = "block";
     
     runPoll();
     state.pollTimer = setInterval(runPoll, 5000);
@@ -399,84 +388,30 @@ function disconnect() {
 }
 
 async function runPoll() {
-    if (state.simulating) return;
+    if (state.simulating || !state.connected) return;
     
-    const ip = $("ip").value.trim();
-    const port = $("port").value.trim() || "80";
-    const useProxy = $("useProxy").checked;
-    
-    resetDiags();
+    const { ip, port, proxy } = state.config;
+    const url = proxy 
+        ? `https://corsproxy.io/?${encodeURIComponent(`http://${ip}:${port}/cm?cmnd=Status%208`)}`
+        : `http://${ip}:${port}/cm?cmnd=Status%208`;
 
-    // Validation: Public proxy cannot reach Local IPs
-    const isLocal = ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.16.") || ip.startsWith("127.0.0.1") || ip.toLowerCase().endsWith(".local");
-    if (useProxy && isLocal) {
-        setDiagStep(1, "fail", "Incompatible");
-        setDiagStep(2, "fail", "Proxy Error");
-        $("diagSuggestion").innerHTML = `<strong>SECURITY LIMITATION:</strong> Public CORS proxies cannot access private local IPs like <code>${ip}</code>. <br>Please <b>uncheck</b> "Use CORS proxy". <br><br><i>Note: If you get CORS errors without the proxy, go to your Tasmota Console and type: <code>CorsAllowed *</code></i>`;
-        return;
-    }
-
-    const endpoints = [
-        `http://${ip}:${port}/cm?cmnd=Status%208`,
-        `http://${ip}:${port}/cm?cmnd=EnergyToday`,
-        `http://${ip}:${port}/cm?cmnd=Status%2010`,
-        `http://${ip}:${port}/api`
-    ];
-
-    setDiagStep(1, "active", "Scanning network...");
-
-    for (let i = 0; i < endpoints.length; i++) {
-        let url = endpoints[i];
-        if (useProxy) url = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+    try {
+        const res = await fetchWithTimeout(url, { mode: 'cors', timeout: 5000 });
+        const data = await res.json();
+        const eng = data.StatusSNS?.ENERGY || data.ENERGY || data;
         
-        try {
-            setDiagStep(2, "active", `Trying ${endpoints[i].split("=")[1] || "API"}...`);
-            
-            const res = await fetchWithTimeout(url, { 
-                mode: "cors",
-                cache: "no-cache",
-                timeout: 4000 
-            });
-
-            const data = await res.json();
+        if (eng && eng.Power !== undefined) {
+            updateUI(eng);
             $("debugView").textContent = JSON.stringify(data, null, 2);
-            
-            // Map data
-            let eng = null;
-            if (data.StatusSNS?.ENERGY) eng = data.StatusSNS.ENERGY;
-            else if (data.Today !== undefined) eng = { Today: data.Today, Power: data.Power, Voltage: data.Voltage, Current: data.Current };
-            else if (data.StatusSNS) eng = data.StatusSNS.ENERGY || data.StatusSNS; // Status 10 variant
-            
-            if (eng) {
-                setDiagStep(1, "success", "Reach OK");
-                setDiagStep(2, "success", "Found Tasmota");
-                setDiagStep(3, "success", useProxy ? "Proxy OK" : "CORS OK");
-                setDiagStep(4, "success", "Data Parsed");
-                updateUI(eng);
-                return;
-            }
-        } catch (e) {
-            console.warn(`Endpoint ${i} failed:`, e);
         }
+    } catch (e) {
+        console.error("Poll failed:", e);
+        $("lastUpd").textContent = "OFFLINE - RETRYING...";
     }
-
-    // If we get here, all failed
-    setDiagStep(1, "fail", "Timed Out");
-    setDiagStep(2, "fail", "Device Unresponsive");
-    setDiagStep(3, "fail", "Check WiFi/CORS");
-    $("diagSuggestion").innerHTML = `SUGGESTION: Ensure device is on the same WiFi (${ip}).<br>${useProxy ? "<b>Disable proxy</b> for local devices." : "Ensure <code>CorsAllowed *</code> is set in Tasmota Console."}`;
 }
 
-function setDiagStep(step, status, info) {
-    const el = $('step' + step);
-    el.className = 'diag-step ' + status;
-    $(el.id + '-info').textContent = info;
-}
-
-function resetDiags() {
-    for(let i=1; i<=4; i++) setDiagStep(i, '', 'Waiting...');
-    $('diagSuggestion').textContent = '';
-}
+function setDiagStep() {} 
+function resetDiags() {}
 
 /* ═══════════════════════════════════════════════════
    SIMULATION ENGINE
